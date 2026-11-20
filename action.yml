@@ -1,0 +1,155 @@
+name: Skopos PR review
+description: >
+  AI code review for pull requests. Packages the PR, has an LLM agent review it
+  against core and project checklists, and posts inline findings, thread replies,
+  resolutions and a dashboard comment. Idempotent across pushes.
+author: johannesE
+branding:
+  icon: eye
+  color: purple
+
+inputs:
+  llm_api_key:
+    description: >
+      API key for the OpenAI-compatible model provider. When empty (for example on
+      pull requests from forks, which receive no secrets) the review is skipped.
+    required: false
+    default: ""
+  app_client_id:
+    description: >
+      Client ID of the GitHub App that posts reviews (recommended). When empty,
+      `github_token` is used and comments come from github-actions[bot].
+    required: false
+    default: ""
+  app_private_key:
+    description: Private key (PEM) of the GitHub App.
+    required: false
+    default: ""
+  github_token:
+    description: Fallback token when no GitHub App is configured. Needs pull-requests write.
+    required: false
+    default: ${{ github.token }}
+  model:
+    description: Model ID at the provider.
+    required: false
+    default: glm-5.3
+  provider_base_url:
+    description: Base URL of an OpenAI-compatible chat completions API.
+    required: false
+    default: https://ollama.com/v1
+  provider_name:
+    description: Display name of the model provider (logs only).
+    required: false
+    default: Ollama Cloud
+  project_checklists_dir:
+    description: >
+      Directory in the reviewed repository with project-specific checklists. Every
+      markdown file in it runs in addition to the core checks. Empty disables it.
+    required: false
+    default: .github/skopos/checklists
+  max_changed_lines:
+    description: Skip the review when the PR changes more lines than this (0 = no limit).
+    required: false
+    default: "0"
+  engine_version:
+    description: Release tag of the review engine (opencode) to install.
+    required: false
+    default: v2.3.2
+  upload_artifacts:
+    description: Upload the packaged context, review files and agent log as a workflow artifact.
+    required: false
+    default: "true"
+  artifacts_retention_days:
+    description: Retention for the uploaded artifact.
+    required: false
+    default: "7"
+
+runs:
+  using: composite
+  steps:
+    - name: Check prerequisites
+      id: guard
+      shell: bash
+      env:
+        LLM_API_KEY: ${{ inputs.llm_api_key }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        if [ -z "$PR_NUMBER" ]; then
+          echo "::error title=Skopos::This action reviews pull requests; run it on pull_request events."
+          exit 1
+        fi
+        if [ -z "$LLM_API_KEY" ]; then
+          echo "::notice title=Skopos::No LLM API key available (fork PR or secret not shared with this repository); skipping review."
+          echo "run=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        echo "run=true" >> "$GITHUB_OUTPUT"
+
+    - name: Check out pull request head
+      if: steps.guard.outputs.run == 'true'
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Mint GitHub App token
+      id: app-token
+      if: steps.guard.outputs.run == 'true' && inputs.app_client_id != ''
+      uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+      with:
+        client-id: ${{ inputs.app_client_id }}
+        private-key: ${{ inputs.app_private_key }}
+        permission-contents: read
+        permission-issues: read
+        permission-pull-requests: write
+
+    - name: Set up uv
+      if: steps.guard.outputs.run == 'true'
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        version: "0.13.9"
+        enable-cache: "false"
+
+    - name: Restore review engine
+      id: engine-cache
+      if: steps.guard.outputs.run == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.tool_cache }}/skopos-engine/${{ inputs.engine_version }}
+        key: skopos-engine-${{ inputs.engine_version }}-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Install review engine
+      if: steps.guard.outputs.run == 'true' && steps.engine-cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        ENGINE_VERSION: ${{ inputs.engine_version }}
+        ENGINE_DIR: ${{ runner.tool_cache }}/skopos-engine/${{ inputs.engine_version }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/install-engine.sh"
+
+    - name: Review pull request
+      if: steps.guard.outputs.run == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.app-token.outputs.token || inputs.github_token }}
+        GH_REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        SKOPOS_BOT_LOGIN: ${{ steps.app-token.outputs.app-slug && format('{0}[bot]', steps.app-token.outputs.app-slug) || 'github-actions[bot]' }}
+        SKOPOS_LLM_API_KEY: ${{ inputs.llm_api_key }}
+        SKOPOS_MODEL: ${{ inputs.model }}
+        SKOPOS_PROVIDER_BASE_URL: ${{ inputs.provider_base_url }}
+        SKOPOS_PROVIDER_NAME: ${{ inputs.provider_name }}
+        SKOPOS_PROJECT_CHECKLISTS_DIR: ${{ inputs.project_checklists_dir }}
+        SKOPOS_MAX_CHANGED_LINES: ${{ inputs.max_changed_lines }}
+        SKOPOS_ENGINE_BIN: ${{ runner.tool_cache }}/skopos-engine/${{ inputs.engine_version }}/opencode
+      run: bash "$GITHUB_ACTION_PATH/scripts/run-review.sh"
+
+    - name: Upload review artifacts
+      if: always() && steps.guard.outputs.run == 'true' && inputs.upload_artifacts == 'true'
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: skopos-review-pr${{ github.event.pull_request.number }}-run${{ github.run_id }}-${{ github.run_attempt }}
+        path: .skopos/
+        include-hidden-files: true
+        if-no-files-found: ignore
+        retention-days: ${{ inputs.artifacts_retention_days }}

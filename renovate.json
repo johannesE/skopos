@@ -1,0 +1,22 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Review engine release pinned in action.yml",
+      "managerFilePatterns": ["/^action\\.yml$/"],
+      "matchStrings": ["engine_version:[\\s\\S]*?default: (?<currentValue>v\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "anomalyco/opencode",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "uv version pinned for setup-uv",
+      "managerFilePatterns": ["/^action\\.yml$/", "/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["setup-uv@[^\\n]+\\n\\s+with:\\n\\s+version: \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""],
+      "depNameTemplate": "astral-sh/uv",
+      "datasourceTemplate": "github-releases"
+    }
+  ]
+}

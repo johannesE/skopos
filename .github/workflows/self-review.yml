@@ -1,0 +1,36 @@
+# Dogfood: review this repository's own pull requests with the local action.
+name: Skopos review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: skopos-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    if: >-
+      !github.event.pull_request.draft &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-skopos') &&
+      github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      # Provides ./action.yml at the PR head. Only same-repository PRs get secrets,
+      # so fork PRs cannot run a modified action with them (the action skips).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: ./
+        with:
+          llm_api_key: ${{ secrets.SKOPOS_LLM_API_KEY }}
+          app_client_id: ${{ vars.SKOPOS_APP_CLIENT_ID }}
+          app_private_key: ${{ secrets.SKOPOS_APP_PRIVATE_KEY }}
