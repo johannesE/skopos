@@ -33,7 +33,7 @@ posts it.
 
 ## Setup
 
-Two steps, plus an optional third. Steps 1 and 3 take about a minute each.
+Steps 1 and 3 are required and take about a minute each. Step 2 is optional.
 
 ```mermaid
 flowchart LR

@@ -252,8 +252,8 @@ flowchart TB
 
 - The AI agent runs with an empty environment. It gets the model key and nothing
   else: no GitHub token, no runner variables.
-- It cannot use the web, plugins or MCP servers, can only run a short list of
-  read-only commands, and can only write to its output folder. The repository
+- It cannot use the web, plugins or MCP servers, can only run a short
+  allowlist of commands, and can only write to its output folder. The repository
   under review cannot loosen these rules.
 - Before anything is posted, Skopos refuses any finding that contains the model
   key or the GitHub token.
