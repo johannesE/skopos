@@ -73,6 +73,8 @@ runs:
       env:
         LLM_API_KEY: ${{ inputs.llm_api_key }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
+        APP_CLIENT_ID: ${{ inputs.app_client_id }}
+        APP_PRIVATE_KEY: ${{ inputs.app_private_key }}
       run: |
         if [ -z "$PR_NUMBER" ]; then
           echo "::error title=Skopos::This action reviews pull requests; run it on pull_request events."
@@ -84,6 +86,14 @@ runs:
           exit 0
         fi
         echo "run=true" >> "$GITHUB_OUTPUT"
+        if [ -n "$APP_CLIENT_ID" ] && [ -n "$APP_PRIVATE_KEY" ]; then
+          echo "app=true" >> "$GITHUB_OUTPUT"
+        else
+          if [ -n "$APP_CLIENT_ID$APP_PRIVATE_KEY" ]; then
+            echo "::warning title=Skopos::Only one of app_client_id / app_private_key is set; posting with github_token instead of the GitHub App."
+          fi
+          echo "app=false" >> "$GITHUB_OUTPUT"
+        fi
 
     - name: Check out pull request head
       if: steps.guard.outputs.run == 'true'
@@ -95,7 +105,7 @@ runs:
 
     - name: Mint GitHub App token
       id: app-token
-      if: steps.guard.outputs.run == 'true' && inputs.app_client_id != ''
+      if: steps.guard.outputs.run == 'true' && steps.guard.outputs.app == 'true'
       uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
       with:
         client-id: ${{ inputs.app_client_id }}

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fall back to `github_token` with a warning when only one of `app_client_id` / `app_private_key` is set, instead of failing the run
+- Simpler README and usage guide with diagrams, copy-paste prompts for coding agents, and a checklist template
+
 ## v1.0.0 — 2026-11-20
 
 First release.

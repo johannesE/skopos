@@ -1,149 +1,175 @@
-# Usage guide
+# Skopos usage guide
 
-Setting Skopos up for a repository or an organization. The [README](../README.md)
-covers what Skopos is and how it works.
+Everything beyond the quick start in the [README](../README.md).
 
-## Quick start: one-prompt adoption
+- [Secrets and variables](#secrets-and-variables)
+- [Create the GitHub App](#create-the-github-app)
+- [Prompts for your coding agent](#prompts-for-your-coding-agent)
+- [Project checklists](#project-checklists)
+- [Use a different model](#use-a-different-model)
+- [Options](#options)
+- [What happens on each push](#what-happens-on-each-push)
+- [Security](#security)
+- [Troubleshooting](#troubleshooting)
 
-A coding agent can do the setup for you. Paste this prompt into it while it is
-working in the repository you want reviewed, and fill in the bracketed part. It
-adds the workflow, writes repository-specific checklists, and opens a pull request.
+## Secrets and variables
 
-Prerequisite: the secrets below already exist for this repository.
+| Name | Type | Needed | Value |
+|---|---|---|---|
+| `SKOPOS_LLM_API_KEY` | secret | yes | API key of your model provider |
+| `SKOPOS_APP_CLIENT_ID` | variable | optional | Client ID of your GitHub App |
+| `SKOPOS_APP_PRIVATE_KEY` | secret | optional | Private key (`.pem` file) of that App |
+
+Set them for one repository:
+
+```bash
+gh secret set SKOPOS_LLM_API_KEY --repo <owner>/<repo>
+gh variable set SKOPOS_APP_CLIENT_ID --repo <owner>/<repo> --body "<client id>"
+gh secret set SKOPOS_APP_PRIVATE_KEY --repo <owner>/<repo> < <app>.private-key.pem
+```
+
+Or once for a whole organization: replace `--repo <owner>/<repo>` with
+`--org <org> --visibility all`. Personal accounts have no account-wide secrets,
+so set them on each repository.
+
+`gh secret set` without `--body` asks for the value, so the key stays out of your
+shell history. Delete the `.pem` file once it is stored.
+
+If you skip the App, Skopos posts with the workflow's own token as
+`github-actions[bot]`. If only one of the two App values is set, it does the same
+and shows a warning.
+
+## Create the GitHub App
+
+The App gives Skopos its own name (`<app>[bot]`) and a short-lived token for
+each run. It never receives webhooks, so there is no server to run.
+
+1. Go to **Settings → Developer settings → GitHub Apps → New GitHub App**. For an
+   organization, use the organization's settings.
+2. **Name:** anything, e.g. `skopos-<org>`. **Homepage URL:** any URL, e.g.
+   `https://github.com/johannesE/skopos`.
+3. **Webhook:** uncheck *Active*.
+4. **Repository permissions:**
+   - Contents: Read-only
+   - Issues: Read-only
+   - Pull requests: Read and write
+5. **Where can this App be installed:** Only on this account.
+6. Click **Create GitHub App**, copy the **Client ID**, and click **Generate a
+   private key**. A `.pem` file downloads.
+7. Click **Install App** and choose the repositories to review.
+8. Store the Client ID and the `.pem` as shown [above](#secrets-and-variables).
+
+## Prompts for your coding agent
+
+Paste these into Claude Code, Codex, Cursor or a similar agent. Each one ends
+with a pull request, and Skopos reviews that pull request.
+
+### Add Skopos to this repository
 
 ```text
-Add the Skopos pull request review (GitHub Action johannesE/skopos) to this
-repository on a new branch, then open a pull request.
+Add the Skopos AI pull request reviewer to this repository.
 
-Background: Skopos reviews every push to a pull request and posts inline
-findings plus a dashboard comment. The review logic ships with the action;
-this repository only adds a workflow file and optional project checklists.
-
-1. Read AGENTS.md / CLAUDE.md and README.md to understand the stack,
-   architecture, conventions and testing patterns. Ask me before assuming
-   anything important.
-
-2. Create .github/workflows/skopos.yml with exactly the content of
-   https://github.com/johannesE/skopos/blob/v1/examples/workflows/skopos.yml
-   Do not commit any secrets; SKOPOS_LLM_API_KEY, SKOPOS_APP_CLIENT_ID and
-   SKOPOS_APP_PRIVATE_KEY are already configured.
-
-3. Create review checklists under .github/skopos/checklists/. Every markdown
-   file there runs. Use check-<topic>.md names and pick topics that matter
-   here, focusing on: <your focus, e.g. "API contract stability, query
-   performance, test coverage for repositories">.
-   Each file has: YAML frontmatter (name, description); "When to run" naming
-   the files/changes that trigger it; "Checklist" with one concrete rule per
-   item, pointing to where the rule is documented (an AGENTS.md section)
-   instead of restating it; "Severity guidance" (Critical/Major/Minor);
-   "Do not flag when" for accepted conventions. Keep each to 8-12 items.
-
-4. Add .skopos/ to .gitignore.
-
-5. Create a branch, commit, push, and open a pull request.
-
-Ask if you are unsure which checks matter most or what could cause noisy findings.
+1. Create .github/workflows/skopos.yml with exactly the content of
+   https://raw.githubusercontent.com/johannesE/skopos/v1/examples/workflows/skopos.yml
+2. Run `gh secret list` and `gh variable list`. If SKOPOS_LLM_API_KEY is
+   missing, stop and tell me to run:
+   gh secret set SKOPOS_LLM_API_KEY --repo <this repo>
+   Never ask me to paste a secret into the chat.
+3. Add .skopos/ to .gitignore.
+4. Create a branch, commit, push and open a pull request. Skopos reviews that
+   pull request itself, so tell me its URL.
 ```
 
-## Secrets and identity
+### Write project checklists
 
-Skopos needs a model API key, plus a GitHub identity to post with.
+```text
+Write review checklists for Skopos, the AI pull request reviewer used in this
+repository.
 
-| Name | Kind | Required | Content |
-|---|---|---|---|
-| `SKOPOS_LLM_API_KEY` | Actions **secret** | yes | API key of your OpenAI-compatible model provider |
-| `SKOPOS_APP_CLIENT_ID` | Actions **variable** | recommended | Client ID of the Skopos GitHub App (not secret) |
-| `SKOPOS_APP_PRIVATE_KEY` | Actions **secret** | recommended | Private key (`.pem` content) of that App |
-
-### Why a GitHub App
-
-Without an App, Skopos posts with the workflow's built-in `GITHUB_TOKEN` as
-`github-actions[bot]`. That works, but every bot shares that name, and review
-threads opened by other workflows look the same. A dedicated App gives you:
-
-- a clear reviewer identity (`skopos-yourorg[bot]`), which is also the identity
-  Skopos uses to decide which threads it may resolve
-- a token minted per run that expires after an hour, scoped to the current
-  repository, with only the permissions listed below
-- one private key to rotate instead of long-lived personal access tokens
-
-### Create the GitHub App (once)
-
-1. Open **Settings → Developer settings → GitHub Apps → New GitHub App**. Use your
-   organization's settings if the repositories belong to an organization; a
-   private App can only be installed on the account that owns it.
-2. Name it, e.g. `skopos-<org>`. Homepage URL: any URL, e.g. your org page.
-3. **Webhook:** uncheck *Active*. Skopos never receives events.
-4. **Repository permissions:**
-   - Contents: **Read-only**
-   - Issues: **Read-only** (to read linked issues)
-   - Pull requests: **Read and write**
-   - Metadata: Read-only (mandatory, preselected)
-5. **Where can this App be installed:** *Only on this account*.
-6. Create it, then copy the **Client ID** from the App page, and generate a
-   **private key** (a `.pem` file downloads).
-7. **Install App** → choose all repositories or the ones you want reviewed.
-
-### Store the values
-
-Organization-wide, shared with selected repositories (recommended for orgs):
-
-```bash
-gh secret set SKOPOS_LLM_API_KEY --org <org> --visibility selected --repos repo-a,repo-b
-gh variable set SKOPOS_APP_CLIENT_ID --org <org> --visibility selected --repos repo-a,repo-b --body "Iv23li..."
-gh secret set SKOPOS_APP_PRIVATE_KEY --org <org> --visibility selected --repos repo-a,repo-b < skopos.private-key.pem
+1. Read AGENTS.md, CLAUDE.md, README.md and the code to learn the stack,
+   conventions and the mistakes that matter here. Ask me what to focus on
+   before writing anything.
+2. Create 2-4 files under .github/skopos/checklists/, named check-<topic>.md.
+   Use the format of
+   https://raw.githubusercontent.com/johannesE/skopos/main/docs/checklist-template.md
+   Keep each one to 8-12 items. Point each item to the place where the rule is
+   written down (an AGENTS.md section, a doc) instead of restating it.
+3. Create a branch, commit, push and open a pull request.
 ```
 
-Use `--visibility all` to share with every repository, or `private` for all
-private repositories. To add a repository later, run the same commands with the
-full `--repos` list, or use the org settings UI (Secrets and variables → Actions).
+### Roll out to many repositories
 
-Repositories on a personal account have no account-wide secrets; set them per
-repository:
+```text
+Add the Skopos AI pull request reviewer to these repositories: <repo-a>, <repo-b>, ...
 
-```bash
-for repo in johannesE/repo-a johannesE/repo-b; do
-  gh secret set SKOPOS_LLM_API_KEY --repo "$repo"
-  gh variable set SKOPOS_APP_CLIENT_ID --repo "$repo" --body "Iv23li..."
-  gh secret set SKOPOS_APP_PRIVATE_KEY --repo "$repo" < skopos.private-key.pem
-done
+For each repository:
+1. Clone it into a temporary folder.
+2. Skip it if .github/workflows/skopos.yml already exists.
+3. Add .github/workflows/skopos.yml with exactly the content of
+   https://raw.githubusercontent.com/johannesE/skopos/v1/examples/workflows/skopos.yml
+   and add .skopos/ to .gitignore.
+4. Create a branch, commit, push and open a pull request titled
+   "Add Skopos pull request review".
+
+Do not set or read any secrets. At the end, list the pull request URLs and the
+repositories that are missing SKOPOS_LLM_API_KEY (check with `gh secret list`).
 ```
 
-`gh secret set` without `--body` prompts for the value, so the key never ends up
-in your shell history.
+For an organization you can also offer Skopos as a workflow template: copy
+`examples/workflows/skopos.yml` to `workflow-templates/skopos.yml` in the
+organization's `.github` repository. Every repository can then add it from
+**Actions → New workflow**.
 
-Delete the downloaded `.pem` file after storing it.
+## Project checklists
 
-### How the secrets are handled at runtime
+Skopos always runs its built-in checks: standards, code quality, edge cases,
+security, performance, tests, logging, architecture and documentation.
 
-- Secrets only reach the steps that need them, via `env`. They are never
-  interpolated into scripts.
-- The App token is minted with only `contents: read`, `issues: read` and
-  `pull-requests: write`, for the current repository.
-- The review agent runs in a cleared environment. It gets the model key but no
-  GitHub token and none of the runner's other variables. Its engine config lives
-  in a temporary home directory, not in the repository.
-- Engine policies hard-deny network tools, web fetch, plugins, MCP servers, edits
-  outside the review output directory, and any shell command not on a short
-  read-only allowlist. These policies outrank any `opencode.json` the reviewed
-  repository contains.
-- Before posting, the entrypoint refuses to publish any review file that
-  contains the model key or the GitHub token.
-- Pull requests from **forks** receive no secrets on `pull_request` events, so
-  the review is skipped with a notice. Skopos never uses `pull_request_target`.
-- Dependabot PRs get Dependabot secrets, not Actions secrets. The example
-  workflow skips bot-authored PRs anyway.
+You can add your own. Every markdown file in `.github/skopos/checklists/` runs on
+top of the built-in checks. Each file says when it applies.
 
-## Model provider
+A checklist looks like [checklist-template.md](checklist-template.md):
 
-Any OpenAI-compatible chat completions endpoint works. The default is Ollama Cloud
-(`https://ollama.com/v1`, model `glm-5.3`):
+```markdown
+---
+name: code-review.check.api-regressions
+description: Catch breaking changes to the public REST API.
+---
 
-1. Create an account at [ollama.com](https://ollama.com) and pick a plan.
-2. Settings → Keys → **Add API Key**.
-3. Store it as `SKOPOS_LLM_API_KEY`.
+# API regressions
 
-Other providers:
+## When to run
+
+When the PR changes files under `src/api/` or `openapi.yaml`.
+
+## Checklist
+
+- [ ] No endpoint is removed or renamed without a deprecation period (`AGENTS.md` API)
+- [ ] No optional parameter becomes required
+- [ ] No response field is removed or renamed
+
+## Severity guidance
+
+| Finding | Severity |
+|---|---|
+| Breaking change without deprecation | Critical |
+| Missing changelog entry | Minor |
+
+## Do not flag when
+
+- the change only adds a new endpoint, field or optional parameter
+```
+
+Tips:
+
+- **Point to your docs.** Skopos reads `AGENTS.md` and `CLAUDE.md`, so a rule that
+  cites them is checked against the real text.
+- **Say what not to flag.** That cuts false findings more than anything else.
+- **Keep it short.** A focused list of 8-12 items beats a long one.
+
+## Use a different model
+
+Any OpenAI-compatible endpoint works:
 
 ```yaml
 - uses: johannesE/skopos@v1
@@ -154,130 +180,90 @@ Other providers:
     provider_name: OpenAI
 ```
 
-Self-hosted (e.g. Ollama or vLLM on your network) works too if the runner can
-reach it: `provider_base_url: http://llm.internal:11434/v1`.
+A self-hosted server works too if the runner can reach it, e.g.
+`provider_base_url: http://llm.internal:11434/v1`.
 
-## Project checklists
+## Options
 
-Skopos ships generic **core checks**. Repositories add **project checks**: every
-markdown file in
+| Input | Default | What it does |
+|---|---|---|
+| `llm_api_key` | — | Model API key. Empty: the review is skipped |
+| `app_client_id` | `""` | GitHub App client ID |
+| `app_private_key` | `""` | GitHub App private key |
+| `github_token` | workflow token | Used when no App is set |
+| `model` | `glm-5.3` | Model ID at the provider |
+| `provider_base_url` | `https://ollama.com/v1` | OpenAI-compatible endpoint |
+| `provider_name` | `Ollama Cloud` | Name shown in logs |
+| `project_checklists_dir` | `.github/skopos/checklists` | Where your checklists live; `""` turns them off |
+| `max_changed_lines` | `0` | Skip PRs larger than this; `0` means no limit |
+| `engine_version` | pinned | Version of the review engine |
+| `upload_artifacts` | `true` | Upload the review files and logs |
+| `artifacts_retention_days` | `7` | How long to keep them |
 
-```
-.github/skopos/checklists/
-```
+## What happens on each push
 
-runs **in addition to** the core checks. Core checks are never replaced. A missing
-directory means core checks only. Use the `project_checklists_dir` input to move it,
-or set it to `""` to disable.
-
-Each checklist decides when it applies through its `When to run` section; a
-checklist without one runs on every PR. Common names:
-
-| File | Typical `When to run` |
-|---|---|
-| `check-project-conventions.md` | every PR — your stack-specific focus |
-| `check-documentation-drift.md` | every PR (self-suppress for docs/test/CI-only PRs) |
-| `check-api-regressions.md` | public API surface changes |
-| `check-testing.md` | test files added or modified |
-| `check-performance.md` | database/query changes |
-| `check-architecture.md` | new files |
-
-Example (`check-api-regressions.md` for a REST service):
-
-```markdown
----
-name: code-review.check.api-regressions
-description: Detect breaking REST API contract changes in the /api/v1 surface.
----
-
-# API Regressions
-
-## When to run
-
-Run when the PR changes files under `src/**/controllers/`, `src/**/dto/`,
-`openapi.yaml`, or error-to-status mappings.
-
-## Checklist
-
-- [ ] Removed or renamed endpoints — a deleted/renamed route or HTTP-method change
-  breaks clients; needs a deprecation period or a new `/api/v2` path (`AGENTS.md` API)
-- [ ] Request parameter changes — renaming parameters or making an optional one
-  required without a default is breaking
-- [ ] Response field removal/renames — need a deprecation path; additive fields are fine
-- [ ] Status code stability — changing which error maps to which status is client-visible
-- [ ] CHANGELOG entry — user-visible API changes add an entry to `CHANGELOG.md`
-
-## Severity guidance
-
-| Finding | Default severity |
-|---|---|
-| Breaking change without versioning or deprecation path | **Critical** |
-| Status code / error contract change without changelog | **Major** |
-| Missing CHANGELOG entry | **Minor** |
-
-## Do not flag when
-
-- the change is purely additive (new optional parameter, new field, new endpoint)
-- the endpoint is already marked deprecated and the PR documents the removal timeline
-- the change touches only internal code with no API surface
+```mermaid
+sequenceDiagram
+    actor Dev as Developer
+    participant PR as Pull request
+    participant S as Skopos
+    Dev->>PR: push
+    PR->>S: workflow starts
+    S->>PR: inline findings + dashboard
+    Dev->>PR: push a fix
+    PR->>S: workflow starts
+    S->>PR: reply in the thread and resolve it
+    Dev->>PR: reply "by design" on another finding
+    Dev->>PR: push
+    PR->>S: workflow starts
+    S->>PR: marks it waived, does not raise it again
 ```
 
-Tips:
+- Each finding is matched to the thread it already has, so new pushes never
+  create duplicates.
+- Skopos only resolves threads it opened. Threads that people open stay theirs.
+- Critical, major and minor findings go inline. Nitpicks stay on the dashboard.
+- `thanks`, `ok` or an emoji is not a rejection.
+- A newer push cancels a running review.
 
-- **Anchor rules in `AGENTS.md` / `CLAUDE.md`.** The packaging step embeds those
-  files (root plus the nearest one for each changed file), so rules that cite them
-  are checked against the real text.
-- **Write "Do not flag when" sections.** They suppress false positives better than
-  anything else.
-- **Include severity guidance**, so triage matches your expectations: Critical/Major
-  post inline, Nitpicks stay on the dashboard.
-- **Keep checklists compact.** Focused lists beat exhaustive ones.
+## Security
 
-## Rolling out to many repositories
+```mermaid
+flowchart TB
+    subgraph runner [GitHub Actions runner]
+        pack["Package<br/>(GitHub token)"]
+        subgraph sandbox [Sandbox]
+            agent["AI agent<br/>(model key only)"]
+        end
+        post["Post<br/>(GitHub token)"]
+    end
+    pack -- context.json --> agent
+    agent -- findings --> post
+    post --> gh[(GitHub)]
+    agent <--> llm[(Model provider)]
+```
 
-- **Organization workflow template:** put `examples/workflows/skopos.yml` into your
-  organization's `.github` repository as `workflow-templates/skopos.yml`, plus a
-  `workflow-templates/skopos.properties.json`:
-
-  ```json
-  { "name": "Skopos review", "description": "AI pull request review", "iconName": "octicon eye" }
-  ```
-
-  Every repository can then add it from **Actions → New workflow**.
-- **Script it:** create a branch with the workflow file in each repository using `gh`.
-
-## Reading the result
-
-- The **dashboard comment** shows open findings expanded, with resolved, waived and
-  duplicate findings collapsed. It is edited in place on every run.
-- **Inline findings** arrive as one review. Critical and Major findings are always
-  posted inline, Minor ones when actionable, and Nitpicks only on the dashboard.
-- Pushing a fix makes Skopos reply in the thread and resolve it, but only threads
-  it opened itself. Threads humans open stay under human control.
-- Reply `by design`, `intentional`, `false positive` or `already addressed` to
-  waive a finding for good. `thanks`, `ok` and emoji are not waivers.
-- To opt a single PR out, add the `skip-skopos` label.
-- Every run uploads `context.json`, the generated review files, the posting logs
-  and the agent log as a workflow artifact. These help when tuning a checklist.
-
-## Costs
-
-Each review is one agent session over the packaged PR, so cost scales with PR size
-and with your provider's prices. Check your provider's usage dashboard after the
-first few reviews. Because Skopos runs on every push, consider:
-
-- `max_changed_lines` to skip very large PRs
-- `cancel-in-progress` (already in the example workflow) so rapid pushes only pay for the last one
-- the `skip-skopos` label for PRs that do not need a review
-
-The only other cost is Actions minutes for the job.
+- The AI agent runs with an empty environment. It gets the model key and nothing
+  else: no GitHub token, no runner variables.
+- It cannot use the web, plugins or MCP servers, can only run a short list of
+  read-only commands, and can only write to its output folder. The repository
+  under review cannot loosen these rules.
+- Before anything is posted, Skopos refuses any finding that contains the model
+  key or the GitHub token.
+- The App token is valid for one hour, for the current repository only, with
+  just the permissions listed above.
+- Pull requests from forks get no secrets from GitHub, so they are skipped.
+  Skopos never uses `pull_request_target`.
 
 ## Troubleshooting
 
-| Symptom | Cause |
+| You see | Why |
 |---|---|
-| Notice "No LLM API key available" | Fork PR, or the secret is not shared with this repository |
-| `Resource not accessible by integration` | App not installed on the repo, or missing Pull requests write permission; without an App, the workflow lacks `pull-requests: write` |
-| Findings skipped as `inline_line_not_in_diff` | The model anchored a finding outside the diff. The agent is told to move such findings to the dashboard; `posting-skipped.jsonl` in the artifact lists what was dropped |
-| Duplicate dashboards | Two runs posted in parallel; keep the `concurrency` block from the example |
-| Review engine exited with an error | See the `agent.log` in the artifact; usually a wrong model ID or base URL |
+| "No LLM API key available" | Fork PR, or the secret is not set for this repository |
+| "Only one of app_client_id / app_private_key is set" | Set both App values, or neither |
+| `Resource not accessible by integration` | The App is not installed on this repository, or lacks *Pull requests: write* |
+| "Review engine exited with an error" | Wrong model ID or base URL; see `agent.log` in the run's artifact |
+| Findings missing from the PR | The finding pointed outside the diff; see `posting-skipped.jsonl` in the artifact |
+| Two dashboards | Two runs posted at once; keep the `concurrency` block from the example |
+
+Each run uploads its review files and logs as an artifact named `skopos-review-pr<number>-…`.
