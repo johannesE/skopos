@@ -12,7 +12,9 @@ set -euo pipefail
 notes_file="${NOTES_FILE:-release-notes.md}"
 repo_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-johannesE/skopos}"
 
-last="$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || true)"
+# Highest strict vX.Y.Z tag reachable from HEAD. Anything else (v1, v1.1.0-rc1,
+# v1.2.3.4) is ignored, so a hand-made tag cannot break the version arithmetic.
+last="$(git tag --merged HEAD --sort=-v:refname | awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/ && !found { print; found = 1 }')"
 range="HEAD"
 [ -n "$last" ] && range="$last..HEAD"
 

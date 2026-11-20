@@ -41,7 +41,10 @@ jobs:
           NOTES_FILE: ${{ runner.temp }}/release-notes.md
         run: bash scripts/next-release.sh >> "$GITHUB_OUTPUT"
 
-      - name: Create release and move the major tag
+      # The major tag moves first: the release tag is what marks this commit as
+      # released, so if anything fails before it exists, a re-run recomputes the
+      # same version and retries both steps (the tag move is idempotent).
+      - name: Move the major tag and create the release
         if: steps.version.outputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
@@ -50,10 +53,10 @@ jobs:
           SHA: ${{ github.sha }}
           NOTES_FILE: ${{ runner.temp }}/release-notes.md
         run: |
-          gh release create "$TAG" --target "$SHA" --title "$TAG" --notes-file "$NOTES_FILE" --latest
           if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$MAJOR" > /dev/null 2>&1; then
             gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$MAJOR" -f sha="$SHA" -F force=true > /dev/null
           else
             gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$MAJOR" -f sha="$SHA" > /dev/null
           fi
+          gh release create "$TAG" --target "$SHA" --title "$TAG" --notes-file "$NOTES_FILE" --latest
           echo "Released $TAG and moved $MAJOR to ${SHA:0:7}" >> "$GITHUB_STEP_SUMMARY"
