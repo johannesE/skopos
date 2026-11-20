@@ -115,10 +115,17 @@ Do not set or read any secrets. At the end, list the pull request URLs and the
 repositories that are missing SKOPOS_LLM_API_KEY (check with `gh secret list`).
 ```
 
-For an organization you can also offer Skopos as a workflow template: copy
-`examples/workflows/skopos.yml` to `workflow-templates/skopos.yml` in the
-organization's `.github` repository. Every repository can then add it from
-**Actions → New workflow**.
+For an organization you can also offer Skopos as a workflow template. In the
+organization's `.github` repository, add two files:
+
+- `workflow-templates/skopos.yml`: a copy of `examples/workflows/skopos.yml`
+- `workflow-templates/skopos.properties.json`:
+
+  ```json
+  { "name": "Skopos review", "description": "AI pull request review", "iconName": "octicon eye" }
+  ```
+
+Every repository can then add it from **Actions → New workflow**.
 
 ## Project checklists
 

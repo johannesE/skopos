@@ -151,7 +151,8 @@ jq -n \
     ]
   }' > "$ENGINE_HOME/.config/opencode/opencode.json"
 
-PROMPT="Follow the attached Skopos code-review skill. Review GitHub pull request #${PR_NUMBER}.
+PROMPT="Follow the attached Skopos code-review skill (it is attached as a file; do not call the skill tool). Review GitHub pull request #${PR_NUMBER}.
+Shell access is limited to an allowlist of read-only commands; pipes, && chains and echo are blocked. Use jq filters instead of pipes.
 The packaged review context is at ${CONTEXT_JSON} (summary attached as manifest.json); it is the source of truth.
 Write the dashboard and comment markdown files into ${REVIEW_DIR} (also in \$SKOPOS_REVIEW_DIR).
 Validate them offline with: skopos-post ${PR_NUMBER} ${REVIEW_DIR} --context ${CONTEXT_JSON}
@@ -190,16 +191,18 @@ if [ "$run_status" -ne 0 ]; then
 fi
 
 # --- Guard: never publish anything containing a credential -----------------------
-if grep -rqF -- "$SKOPOS_LLM_API_KEY" "$REVIEW_DIR" --include='*.md' --include='*.markdown'; then
-  echo "::error title=Skopos::A review file contains the LLM API key; refusing to post."
-  find "$REVIEW_DIR" -maxdepth 1 -type f \( -name '*.md' -o -name '*.markdown' \) -delete
-  exit 1
-fi
-if grep -rqF -- "$GH_TOKEN" "$REVIEW_DIR"; then
-  echo "::error title=Skopos::A review file contains the GitHub token; refusing to post."
-  find "$REVIEW_DIR" -maxdepth 1 -type f \( -name '*.md' -o -name '*.markdown' \) -delete
-  exit 1
-fi
+# Scans every file, agent.log included, because the folder is uploaded as an artifact.
+refuse_if_contains() {
+  local secret="$1" label="$2"
+  [ -n "$secret" ] || return 0
+  if grep -rqF -e "$secret" "$REVIEW_DIR"; then
+    echo "::error title=Skopos::The review output contains the $label; refusing to post."
+    find "$REVIEW_DIR" -maxdepth 1 -type f \( -name '*.md' -o -name '*.markdown' -o -name 'agent.log' \) -delete
+    exit 1
+  fi
+}
+refuse_if_contains "$SKOPOS_LLM_API_KEY" "LLM API key"
+refuse_if_contains "$GH_TOKEN" "GitHub token"
 
 if ! find "$REVIEW_DIR" -maxdepth 1 -type f \( -name '*.md' -o -name '*.markdown' \) | grep -q .; then
   echo "::error title=Skopos::The agent produced no review files."
