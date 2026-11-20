@@ -66,7 +66,7 @@ REVIEW_DIR="$REVIEW_BASE/$PR_NUMBER/$RUN_ID"
 mkdir -p "$CONTEXT_BASE" "$REVIEW_DIR"
 
 echo "::group::Package pull request #$PR_NUMBER"
-package_result="$(uv run --quiet --script "$SKILL_DIR/scripts/package_review_context.py" pr "$PR_NUMBER" --output-dir "$CONTEXT_BASE")"
+package_result="$(uv run --no-config --quiet --script "$SKILL_DIR/scripts/package_review_context.py" pr "$PR_NUMBER" --output-dir "$CONTEXT_BASE")"
 echo "$package_result"
 echo "::endgroup::"
 CONTEXT_JSON="$(jq -r '.context_json' <<< "$package_result")"
@@ -80,7 +80,7 @@ if [ "$MAX_CHANGED_LINES" -gt 0 ] && [ "$CHANGED_LINES" -gt "$MAX_CHANGED_LINES"
 fi
 
 # Warm the executor's dependencies so the agent's offline validation is fast.
-uv run --quiet --script "$SKILL_DIR/scripts/post_review_comments.py" --help > /dev/null
+uv run --no-config --quiet --script "$SKILL_DIR/scripts/post_review_comments.py" --help > /dev/null
 
 # --- Phase 1: agent review (isolated engine, no GitHub credentials) -------------
 ENGINE_HOME="$WORK/home"
@@ -151,7 +151,8 @@ jq -n \
     ]
   }' > "$ENGINE_HOME/.config/opencode/opencode.json"
 
-PROMPT="Follow the attached Skopos code-review skill. Review GitHub pull request #${PR_NUMBER}.
+PROMPT="Follow the attached Skopos code-review skill (it is attached as a file; do not call the skill tool). Review GitHub pull request #${PR_NUMBER}.
+Shell access is limited to a short allowlist of commands; pipes, && chains and echo are blocked. Use jq filters instead of pipes.
 The packaged review context is at ${CONTEXT_JSON} (summary attached as manifest.json); it is the source of truth.
 Write the dashboard and comment markdown files into ${REVIEW_DIR} (also in \$SKOPOS_REVIEW_DIR).
 Validate them offline with: skopos-post ${PR_NUMBER} ${REVIEW_DIR} --context ${CONTEXT_JSON}
@@ -190,16 +191,18 @@ if [ "$run_status" -ne 0 ]; then
 fi
 
 # --- Guard: never publish anything containing a credential -----------------------
-if grep -rqF -- "$SKOPOS_LLM_API_KEY" "$REVIEW_DIR" --include='*.md' --include='*.markdown'; then
-  echo "::error title=Skopos::A review file contains the LLM API key; refusing to post."
-  find "$REVIEW_DIR" -maxdepth 1 -type f \( -name '*.md' -o -name '*.markdown' \) -delete
-  exit 1
-fi
-if grep -rqF -- "$GH_TOKEN" "$REVIEW_DIR"; then
-  echo "::error title=Skopos::A review file contains the GitHub token; refusing to post."
-  find "$REVIEW_DIR" -maxdepth 1 -type f \( -name '*.md' -o -name '*.markdown' \) -delete
-  exit 1
-fi
+# Scans every file, agent.log included, because the folder is uploaded as an artifact.
+refuse_if_contains() {
+  local secret="$1" label="$2"
+  [ -n "$secret" ] || return 0
+  if grep -rqF -e "$secret" "$REVIEW_DIR"; then
+    echo "::error title=Skopos::The review output contains the $label; refusing to post."
+    find "$REVIEW_DIR" -type f -delete
+    exit 1
+  fi
+}
+refuse_if_contains "$SKOPOS_LLM_API_KEY" "LLM API key"
+refuse_if_contains "$GH_TOKEN" "GitHub token"
 
 if ! find "$REVIEW_DIR" -maxdepth 1 -type f \( -name '*.md' -o -name '*.markdown' \) | grep -q .; then
   echo "::error title=Skopos::The agent produced no review files."
@@ -210,7 +213,7 @@ fi
 # --- Phase 2: post against live PR state -----------------------------------------
 echo "::group::Post review"
 post_status=0
-uv run --quiet --script "$SKILL_DIR/scripts/post_review_comments.py" "$PR_NUMBER" "$REVIEW_DIR" || post_status=$?
+uv run --no-config --quiet --script "$SKILL_DIR/scripts/post_review_comments.py" "$PR_NUMBER" "$REVIEW_DIR" || post_status=$?
 echo "::endgroup::"
 
 if [ -f "$REVIEW_DIR/posting-summary.json" ]; then
@@ -221,5 +224,8 @@ if [ -f "$REVIEW_DIR/posting-summary.json" ]; then
     "|---|---|---|---|---|---|---|",
     "| \(.inline_posted) | \(.comments_created) | \(.updated) | \(.replied) | \(.resolved) | \(.skipped) | \(.failed + .resolve_failed + .resolve_invalid) |"
   ' "$REVIEW_DIR/posting-summary.json" >> "$SUMMARY_FILE"
+  if [ "$(jq -r '.resolve_failed // 0' "$REVIEW_DIR/posting-summary.json")" -gt 0 ]; then
+    echo "::warning title=Skopos::Could not resolve fixed threads. Resolving needs contents: write on the workflow token (or Contents: Read and write on the GitHub App)."
+  fi
 fi
 exit "$post_status"

@@ -509,7 +509,9 @@ class ReviewPoster:
     def exit_code(self) -> int:
         if self.failed > 0:
             return 1
-        if self.resolve_failed > 0 or self.resolve_validation_failed > 0:
+        # A rejected resolve (usually a token without contents: write) leaves the
+        # reply in place and is reported as a warning by the entrypoint, not a failure.
+        if self.resolve_validation_failed > 0:
             return 1
         return 0
 

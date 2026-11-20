@@ -1,118 +1,132 @@
 # Skopos
 
-*σκοπός — "watcher, lookout"*
+*σκοπός: "watcher, lookout"*
 
-Skopos is a GitHub Action that reviews pull requests with an LLM agent and posts
-the results back to the PR:
+Skopos is an AI reviewer for GitHub pull requests. On every push it reads the
+change and posts:
 
-- **3–7 inline findings** per review, submitted as one GitHub review, with ready-to-commit `suggestion` blocks
-- **a dashboard comment** listing open, resolved, waived and duplicate findings, updated in place on each run
-- **replies on existing threads** when there is new evidence, and **resolves its own threads** once the code is fixed
+- **a few inline findings**, each with a ready-to-commit fix where possible
+- **one dashboard comment** that lists every finding and its status
+- **replies** in its own threads, which it **resolves** once you fix the code
 
-It runs on every push to a pull request and is idempotent. Findings are matched to
-existing threads, so a new push replies in the existing thread instead of opening a
-duplicate. Replies such as `by design` or `false positive` from the PR author or
-reviewers mark a finding as waived, and it is not raised again.
-
-It works in any repository and language. The core checks are generic: standards,
-quality, edge cases, security, performance, tests, logging, architecture and docs.
-Each repository can add its own checklists.
-
-## Quick start
-
-1. **Set the secrets once** (details in [docs/usage.md](docs/usage.md#secrets-and-identity)):
-
-   | Name | Kind | Value |
-   |---|---|---|
-   | `SKOPOS_LLM_API_KEY` | secret | API key of your model provider |
-   | `SKOPOS_APP_CLIENT_ID` | variable | Client ID of your Skopos GitHub App (optional, recommended) |
-   | `SKOPOS_APP_PRIVATE_KEY` | secret | Private key of that App (optional, recommended) |
-
-   Set them at organization level and share them with selected repositories, or set
-   them per repository.
-
-2. **Add the workflow.** Copy [`examples/workflows/skopos.yml`](examples/workflows/skopos.yml)
-   to `.github/workflows/skopos.yml`:
-
-   ```yaml
-   name: Skopos review
-   on:
-     pull_request:
-       types: [opened, synchronize, reopened, ready_for_review]
-   concurrency:
-     group: skopos-${{ github.event.pull_request.number }}
-     cancel-in-progress: true
-   permissions:
-     contents: read
-     pull-requests: write
-   jobs:
-     review:
-       if: >-
-         !github.event.pull_request.draft &&
-         !contains(github.event.pull_request.labels.*.name, 'skip-skopos') &&
-         github.event.pull_request.user.type != 'Bot'
-       runs-on: ubuntu-latest
-       timeout-minutes: 30
-       continue-on-error: true
-       steps:
-         - uses: johannesE/skopos@v1
-           with:
-             llm_api_key: ${{ secrets.SKOPOS_LLM_API_KEY }}
-             app_client_id: ${{ vars.SKOPOS_APP_CLIENT_ID }}
-             app_private_key: ${{ secrets.SKOPOS_APP_PRIVATE_KEY }}
-   ```
-
-3. **Optional:** add project checklists under `.github/skopos/checklists/`
-   ([how](docs/usage.md#project-checklists)).
-
-Open a pull request. The review shows up a few minutes later.
+It works with any language and any OpenAI-compatible model.
 
 ## How it works
 
+```mermaid
+flowchart LR
+    push([Push to a PR]) --> pack
+    subgraph action [Skopos GitHub Action]
+        pack["1. Package<br/>diff, files, threads,<br/>linked issue, AGENTS.md"]
+        agent["2. Review<br/>AI agent in a sandbox<br/>writes findings"]
+        post["3. Post<br/>checks findings,<br/>talks to GitHub"]
+        pack --> agent --> post
+    end
+    post --> review[Inline review]
+    post --> dash[Dashboard comment]
+    post --> threads[Replies and resolved threads]
 ```
-pull_request push
-  └─ Skopos action
-       1. Package   gh + git → .skopos/review-context/…/context.json
-                    (diff, file contents, review threads, comments, linked issue, AGENTS.md)
-       2. Review    LLM agent in a sandbox: no GitHub token, no network tools,
-                    writes markdown findings, validates them offline
-       3. Post      deterministic Python executor: dedupe, one review with inline
-                    comments, replies, thread resolution, dashboard upsert
+
+The AI never gets a GitHub token. It can only read the packaged pull request and
+write findings to a folder. A plain Python script then checks every finding and
+posts it.
+
+## Setup
+
+Steps 1 and 3 are required and take about a minute each. Step 2 is optional.
+
+```mermaid
+flowchart LR
+    a["1. Model API key<br/>(e.g. Ollama Cloud)"] --> b["2. GitHub App<br/>(optional, gives the bot a name)"] --> c["3. Workflow file<br/>in each repository"]
 ```
 
-The agent never sees a GitHub credential. It runs with a minimal environment, a
-short shell allowlist, edits limited to its output directory, and no plugins, MCP
-servers or web access. These limits are enforced as engine policies that the
-reviewed repository's own configuration cannot loosen. Posting is done afterwards
-by the executor, which checks every inline comment against the diff and refuses to
-post anything that contains a credential.
+### 1. Store the model API key
 
-## Inputs
+```bash
+gh secret set SKOPOS_LLM_API_KEY --repo <owner>/<repo>
+```
 
-| Input | Default | Description |
-|---|---|---|
-| `llm_api_key` | — | Model provider API key. Empty → review skipped (e.g. fork PRs) |
-| `app_client_id` / `app_private_key` | `""` | GitHub App that posts reviews; empty → `github_token` (github-actions[bot]) |
-| `github_token` | `${{ github.token }}` | Fallback token |
-| `model` | `glm-5.3` | Model ID at the provider |
-| `provider_base_url` | `https://ollama.com/v1` | Any OpenAI-compatible endpoint |
-| `provider_name` | `Ollama Cloud` | Display name (logs only) |
-| `project_checklists_dir` | `.github/skopos/checklists` | Project checklist directory; `""` disables |
-| `max_changed_lines` | `0` | Skip PRs that change more lines than this (`0` = no limit) |
-| `engine_version` | pinned | Review engine release |
-| `upload_artifacts` | `true` | Upload context, review files and agent log |
-| `artifacts_retention_days` | `7` | Artifact retention |
+For an organization, use `--org <org> --visibility all` instead of `--repo`.
+The default model is `glm-5.3` on [Ollama Cloud](https://ollama.com). Any
+OpenAI-compatible provider works ([how](docs/usage.md#use-a-different-model)).
 
-## Repository layout
+### 2. Optional: give the bot its own name
 
-- `action.yml` — the composite action
-- `scripts/run-review.sh` — entrypoint: package → sandboxed agent → post
-- `scripts/install-engine.sh` — installs the pinned review engine
-- `bin/skopos-post` — executor wrapper the agent uses for offline validation
-- `skills/code-review/` — review skill: `SKILL.md`, core checklists, packaging and posting scripts
-- `examples/workflows/skopos.yml` — consumer workflow
-- `docs/usage.md` — setup, secrets, checklists, options, costs
-- `tests/` — unit tests for the GitHub-specific logic
+Without this step Skopos posts as `github-actions[bot]`. With a GitHub App it
+posts as `<your-app>[bot]`. See [Create the GitHub App](docs/usage.md#create-the-github-app).
+
+### 3. Add the workflow
+
+Save this as `.github/workflows/skopos.yml`:
+
+```yaml
+name: Skopos review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+concurrency:
+  group: skopos-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+permissions:
+  contents: write # lets Skopos resolve its own threads
+  pull-requests: write
+jobs:
+  review:
+    if: >-
+      !github.event.pull_request.draft &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-skopos') &&
+      github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: johannesE/skopos@v1
+        with:
+          llm_api_key: ${{ secrets.SKOPOS_LLM_API_KEY }}
+          app_client_id: ${{ vars.SKOPOS_APP_CLIENT_ID }}
+          app_private_key: ${{ secrets.SKOPOS_APP_PRIVATE_KEY }}
+```
+
+Open a pull request. The review appears a few minutes later.
+
+### Or let your coding agent do it
+
+Paste this into Claude Code, Codex, Cursor or a similar agent, inside the
+repository you want reviewed:
+
+```text
+Add the Skopos AI pull request reviewer to this repository.
+
+1. Create .github/workflows/skopos.yml with exactly the content of
+   https://raw.githubusercontent.com/johannesE/skopos/v1/examples/workflows/skopos.yml
+2. Run `gh secret list` and `gh variable list`. If SKOPOS_LLM_API_KEY is
+   missing, stop and tell me to run:
+   gh secret set SKOPOS_LLM_API_KEY --repo <this repo>
+   Never ask me to paste a secret into the chat.
+3. Add .skopos/ to .gitignore.
+4. Create a branch, commit, push and open a pull request. Skopos reviews that
+   pull request itself, so tell me its URL.
+```
+
+More prompts (project checklists, rolling out to many repositories) are in
+[docs/usage.md](docs/usage.md#prompts-for-your-coding-agent).
+
+## Working with the reviewer
+
+| You want to | Do this |
+|---|---|
+| Get a new review | Push to the pull request |
+| Accept a finding | Commit the suggestion or fix the code; Skopos resolves the thread |
+| Reject a finding | Reply `by design`, `intentional` or `false positive`; it is not raised again |
+| Skip one pull request | Add the `skip-skopos` label |
+| Skip draft PRs | Nothing; drafts are skipped automatically |
+| Teach it your rules | Add checklists to `.github/skopos/checklists/` ([how](docs/usage.md#project-checklists)) |
+
+## Documentation
+
+- [docs/usage.md](docs/usage.md): GitHub App, secrets, prompts, checklists,
+  options, security, troubleshooting
+- [CHANGELOG.md](CHANGELOG.md)
 
 ## Development
 
@@ -122,14 +136,5 @@ uvx ruff check .
 uvx --from actionlint-py actionlint
 ```
 
-Run the skill against a local branch without GitHub access:
-
-```bash
-uv run skills/code-review/scripts/package_review_context.py local --base-ref main
-```
-
-## Releasing
-
-Push a semver tag (`v1.2.3`). The release workflow moves the major tag (`v1`) and
-creates a GitHub release. Consumers on `@v1` pick it up automatically; pin
-`@v1.2.3` or a commit SHA for full reproducibility.
+Releases: push a tag like `v1.2.3`. The release workflow moves `v1` to it and
+creates a GitHub release.
