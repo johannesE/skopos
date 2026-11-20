@@ -82,6 +82,19 @@ def test_offline_validation_queues_valid_and_skips_out_of_diff(tmp_path):
     assert poster.total == 3  # scratch file ignored
 
 
+@pytest.mark.parametrize(
+    ("counter", "expected"),
+    [("resolve_failed", 0), ("resolve_validation_failed", 1), ("failed", 1)],
+)
+def test_exit_code_treats_rejected_resolve_as_warning(tmp_path, counter, expected):
+    # A resolve GitHub rejects (token without contents: write) is reported as a
+    # warning by run-review.sh; invalid resolution metadata and failed posts still fail.
+    poster, _ = run_offline(tmp_path, {"00-dashboard.md": f"{DASHBOARD_MARKER}\n"})
+    assert poster.exit_code() == 0
+    setattr(poster, counter, 1)
+    assert poster.exit_code() == expected
+
+
 def test_dashboard_updates_only_own_comment(tmp_path):
     notes = [
         {"id": "50", "body": f"{DASHBOARD_MARKER} quoted by a human", "author": {"username": "octocat"}},

@@ -152,7 +152,7 @@ jq -n \
   }' > "$ENGINE_HOME/.config/opencode/opencode.json"
 
 PROMPT="Follow the attached Skopos code-review skill (it is attached as a file; do not call the skill tool). Review GitHub pull request #${PR_NUMBER}.
-Shell access is limited to an allowlist of read-only commands; pipes, && chains and echo are blocked. Use jq filters instead of pipes.
+Shell access is limited to a short allowlist of commands; pipes, && chains and echo are blocked. Use jq filters instead of pipes.
 The packaged review context is at ${CONTEXT_JSON} (summary attached as manifest.json); it is the source of truth.
 Write the dashboard and comment markdown files into ${REVIEW_DIR} (also in \$SKOPOS_REVIEW_DIR).
 Validate them offline with: skopos-post ${PR_NUMBER} ${REVIEW_DIR} --context ${CONTEXT_JSON}

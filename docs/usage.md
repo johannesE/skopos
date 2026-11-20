@@ -197,7 +197,7 @@ A self-hosted server works too if the runner can reach it, e.g.
 | `llm_api_key` | — | Model API key. Empty: the review is skipped |
 | `app_client_id` | `""` | GitHub App client ID |
 | `app_private_key` | `""` | GitHub App private key |
-| `github_token` | workflow token | Used when no App is set |
+| `github_token` | workflow token | Used unless both App values are set |
 | `model` | `glm-5.3` | Model ID at the provider |
 | `provider_base_url` | `https://ollama.com/v1` | OpenAI-compatible endpoint |
 | `provider_name` | `Ollama Cloud` | Name shown in logs |
@@ -274,7 +274,7 @@ flowchart TB
 |---|---|
 | "No LLM API key available" | Fork PR, or the secret is not set for this repository |
 | "Only one of app_client_id / app_private_key is set" | Set both App values, or neither |
-| `Resource not accessible by integration` | The App is not installed on this repository, or lacks *Pull requests: write* |
+| `Resource not accessible by integration` | The App is not installed on this repository or lacks *Pull requests: write*; without an App, the workflow lacks `pull-requests: write` |
 | "Could not resolve fixed threads" | The token lacks *contents: write*; Skopos still replies, but cannot resolve |
 | App token step fails after upgrading | The App still has *Contents: Read-only*; change it to *Read and write* and accept the new permissions on the installation |
 | "Review engine exited with an error" | Wrong model ID or base URL; see `agent.log` in the run's artifact |
