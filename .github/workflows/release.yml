@@ -1,29 +1,59 @@
-# Push a semver tag (v1.2.3) to release. This moves the major tag (v1) to it,
+# Every push to main is released: CI runs first, then scripts/next-release.sh
+# picks the version from the commit messages since the last tag (Conventional
+# Commits: "type!:" or "BREAKING CHANGE:" -> major, "feat:" -> minor, else patch),
+# a GitHub release vX.Y.Z is created, and the major tag (v1) is moved to it,
 # which is what consumers reference with `uses: johannesE/skopos@v1`.
 name: Release
 
 on:
   push:
-    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+    branches: [main]
+  workflow_dispatch:
+
+# Releases run one after another, never in parallel, so versions cannot collide.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  move-major-tag:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write # create the release and move the major tag
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Move major version tag
+        with:
+          fetch-depth: 0 # history and tags, to find the last release
+          persist-credentials: false
+
+      - name: Work out the next version
+        id: version
         env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          major="${TAG%%.*}"
-          git tag -f "$major" "$TAG"
-          git push -f origin "refs/tags/$major"
-      - name: Create GitHub release
+          NOTES_FILE: ${{ runner.temp }}/release-notes.md
+        run: bash scripts/next-release.sh >> "$GITHUB_OUTPUT"
+
+      - name: Create release and move the major tag
+        if: steps.version.outputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" --generate-notes --verify-tag
+          TAG: ${{ steps.version.outputs.tag }}
+          MAJOR: ${{ steps.version.outputs.major }}
+          SHA: ${{ github.sha }}
+          NOTES_FILE: ${{ runner.temp }}/release-notes.md
+        run: |
+          gh release create "$TAG" --target "$SHA" --title "$TAG" --notes-file "$NOTES_FILE" --latest
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$MAJOR" > /dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$MAJOR" -f sha="$SHA" -F force=true > /dev/null
+          else
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$MAJOR" -f sha="$SHA" > /dev/null
+          fi
+          echo "Released $TAG and moved $MAJOR to ${SHA:0:7}" >> "$GITHUB_STEP_SUMMARY"
