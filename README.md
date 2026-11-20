@@ -68,7 +68,7 @@ concurrency:
   group: skopos-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 permissions:
-  contents: read
+  contents: write # lets Skopos resolve its own threads
   pull-requests: write
 jobs:
   review:

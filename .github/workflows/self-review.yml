@@ -9,8 +9,10 @@ concurrency:
   group: skopos-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+# Used only when no GitHub App is configured. contents: write lets Skopos
+# resolve its own review threads; GitHub requires it for that.
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 jobs:

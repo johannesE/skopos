@@ -2,4 +2,4 @@
 # Run the Skopos posting executor. In CI the review agent calls this with
 # --context <context.json> for offline validation (it has no GitHub token).
 set -euo pipefail
-exec uv run --quiet --script "${SKOPOS_SKILL_DIR:?SKOPOS_SKILL_DIR must be set}/scripts/post_review_comments.py" "$@"
+exec uv run --no-config --quiet --script "${SKOPOS_SKILL_DIR:?SKOPOS_SKILL_DIR must be set}/scripts/post_review_comments.py" "$@"

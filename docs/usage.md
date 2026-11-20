@@ -50,7 +50,7 @@ each run. It never receives webhooks, so there is no server to run.
    `https://github.com/johannesE/skopos`.
 3. **Webhook:** uncheck *Active*.
 4. **Repository permissions:**
-   - Contents: Read-only
+   - Contents: Read and write (GitHub requires it to resolve review threads)
    - Issues: Read-only
    - Pull requests: Read and write
 5. **Where can this App be installed:** Only on this account.
@@ -259,6 +259,12 @@ flowchart TB
   key or the GitHub token.
 - The App token is valid for one hour, for the current repository only, with
   just the permissions listed above.
+- Skopos needs *Contents: write* only because GitHub requires it to resolve
+  review threads. Only the posting script holds the token, and it only
+  creates comments, replies and resolves its own threads. The AI agent never
+  sees it.
+- Skopos runs `uv` with `--no-config`, so the repository under review cannot
+  change where its Python dependencies come from.
 - Pull requests from forks get no secrets from GitHub, so they are skipped.
   Skopos never uses `pull_request_target`.
 
@@ -269,6 +275,8 @@ flowchart TB
 | "No LLM API key available" | Fork PR, or the secret is not set for this repository |
 | "Only one of app_client_id / app_private_key is set" | Set both App values, or neither |
 | `Resource not accessible by integration` | The App is not installed on this repository, or lacks *Pull requests: write* |
+| "Could not resolve fixed threads" | The token lacks *contents: write*; Skopos still replies, but cannot resolve |
+| App token step fails after upgrading | The App still has *Contents: Read-only*; change it to *Read and write* and accept the new permissions on the installation |
 | "Review engine exited with an error" | Wrong model ID or base URL; see `agent.log` in the run's artifact |
 | Findings missing from the PR | The finding pointed outside the diff; see `posting-skipped.jsonl` in the artifact |
 | Two dashboards | Two runs posted at once; keep the `concurrency` block from the example |

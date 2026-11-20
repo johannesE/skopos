@@ -66,7 +66,7 @@ REVIEW_DIR="$REVIEW_BASE/$PR_NUMBER/$RUN_ID"
 mkdir -p "$CONTEXT_BASE" "$REVIEW_DIR"
 
 echo "::group::Package pull request #$PR_NUMBER"
-package_result="$(uv run --quiet --script "$SKILL_DIR/scripts/package_review_context.py" pr "$PR_NUMBER" --output-dir "$CONTEXT_BASE")"
+package_result="$(uv run --no-config --quiet --script "$SKILL_DIR/scripts/package_review_context.py" pr "$PR_NUMBER" --output-dir "$CONTEXT_BASE")"
 echo "$package_result"
 echo "::endgroup::"
 CONTEXT_JSON="$(jq -r '.context_json' <<< "$package_result")"
@@ -80,7 +80,7 @@ if [ "$MAX_CHANGED_LINES" -gt 0 ] && [ "$CHANGED_LINES" -gt "$MAX_CHANGED_LINES"
 fi
 
 # Warm the executor's dependencies so the agent's offline validation is fast.
-uv run --quiet --script "$SKILL_DIR/scripts/post_review_comments.py" --help > /dev/null
+uv run --no-config --quiet --script "$SKILL_DIR/scripts/post_review_comments.py" --help > /dev/null
 
 # --- Phase 1: agent review (isolated engine, no GitHub credentials) -------------
 ENGINE_HOME="$WORK/home"
@@ -197,7 +197,7 @@ refuse_if_contains() {
   [ -n "$secret" ] || return 0
   if grep -rqF -e "$secret" "$REVIEW_DIR"; then
     echo "::error title=Skopos::The review output contains the $label; refusing to post."
-    find "$REVIEW_DIR" -maxdepth 1 -type f \( -name '*.md' -o -name '*.markdown' -o -name 'agent.log' \) -delete
+    find "$REVIEW_DIR" -type f -delete
     exit 1
   fi
 }
@@ -213,7 +213,7 @@ fi
 # --- Phase 2: post against live PR state -----------------------------------------
 echo "::group::Post review"
 post_status=0
-uv run --quiet --script "$SKILL_DIR/scripts/post_review_comments.py" "$PR_NUMBER" "$REVIEW_DIR" || post_status=$?
+uv run --no-config --quiet --script "$SKILL_DIR/scripts/post_review_comments.py" "$PR_NUMBER" "$REVIEW_DIR" || post_status=$?
 echo "::endgroup::"
 
 if [ -f "$REVIEW_DIR/posting-summary.json" ]; then
@@ -224,5 +224,8 @@ if [ -f "$REVIEW_DIR/posting-summary.json" ]; then
     "|---|---|---|---|---|---|---|",
     "| \(.inline_posted) | \(.comments_created) | \(.updated) | \(.replied) | \(.resolved) | \(.skipped) | \(.failed + .resolve_failed + .resolve_invalid) |"
   ' "$REVIEW_DIR/posting-summary.json" >> "$SUMMARY_FILE"
+  if [ "$(jq -r '.resolve_failed // 0' "$REVIEW_DIR/posting-summary.json")" -gt 0 ]; then
+    echo "::warning title=Skopos::Could not resolve fixed threads. Resolving needs contents: write on the workflow token (or Contents: Read and write on the GitHub App)."
+  fi
 fi
 exit "$post_status"
