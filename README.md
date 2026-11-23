@@ -1,5 +1,7 @@
 # Skopos
 
+![A lone lookout on a castle tower at night, watching a distant beacon](docs/assets/skopos-lookout.webp)
+
 *σκοπός: "watcher, lookout"*
 
 Skopos is an AI reviewer for GitHub pull requests. On every push it reads the
