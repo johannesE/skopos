@@ -126,7 +126,7 @@ More prompts (project checklists, rolling out to many repositories) are in
 
 - [docs/usage.md](docs/usage.md): GitHub App, secrets, prompts, checklists,
   options, security, troubleshooting
-- [CHANGELOG.md](CHANGELOG.md)
+- [Releases](https://github.com/johannesE/skopos/releases): what changed in each version
 
 ## Development
 
@@ -134,7 +134,28 @@ More prompts (project checklists, rolling out to many repositories) are in
 uv run --no-project --with pytest --with pyyaml python -m pytest -q tests
 uvx ruff check .
 uvx --from actionlint-py actionlint
+shellcheck scripts/*.sh bin/skopos-post
 ```
 
-Releases: push a tag like `v1.2.3`. The release workflow moves `v1` to it and
-creates a GitHub release.
+### Releases
+
+Every push to `main` is released automatically, after CI passes:
+
+```mermaid
+flowchart LR
+    push([Push to main]) --> ci[CI] --> ver["Pick version<br/>from commit messages"] --> rel["Release vX.Y.Z<br/>move v1 to it"]
+```
+
+The version comes from the commit messages since the last release
+([Conventional Commits](https://www.conventionalcommits.org)):
+
+| Commit message | Example | Release |
+|---|---|---|
+| `type!:` or a `BREAKING CHANGE:` footer | `feat!: rename the model input` | major: `v2.0.0` |
+| `feat:` | `feat: add a max_files input` | minor: `v1.1.0` |
+| anything else | `fix: …`, `docs: …`, `chore: …` | patch: `v1.0.1` |
+
+With a merge commit, every commit of the pull request counts and the merge
+commit itself is ignored. With a squash merge, only the pull request title
+counts, so give it a Conventional Commit title too. A major release creates a
+new major tag (`v2`); `v1` users stay on `v1`.
